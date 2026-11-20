@@ -1,96 +1,85 @@
-# shvirtd-example-python
+# Отчёт по домашнему заданию «Практическое применение Docker»
 
-Учебный проект FastAPI-приложения для изучения Docker Compose.
+Форк: https://github.com/kinnwailos/shvirtd-example-python
 
-## Описание проекта
+Код приложения не менялся. Решение добавлено файлами `Dockerfile.python`, `compose.yaml`, `.dockerignore`, `.gitignore`, `deploy.sh` и `backup.sh`. Этот README — отчёт по заданию.
 
-Это простое веб-приложение на FastAPI, предназначенное для изучения контейнеризации и работы с Docker Compose. Приложение демонстрирует:
+## Задача 0
 
-- Создание веб-сервиса на FastAPI
-- Подключение к базе данных MySQL
-- Работу с прокси-серверами (Nginx → HAProxy → FastAPI)
-- Корректную настройку сетей Docker
-- Передачу IP-адресов через заголовки прокси
+`docker-compose` с дефисом в системе нет. Плагин `docker compose` установлен, версия v5.6.1 (требование — не ниже v2.24).
 
-### Функциональность
+![Задача 0: docker-compose не найден, docker compose v5.6.1](screenshots/task0-compose-version.png)
 
-При обращении к главной странице приложение:
-1. Определяет IP-адрес клиента
-2. Записывает время запроса и IP-адрес в базу данных MySQL
-3. Возвращает эту информацию пользователю
+## Задача 1
 
-**Важно для обучения:** Если обращаться к приложению напрямую (минуя прокси), вы получите подсказку о неправильном выполнении задания.
+`Dockerfile.python` — multistage-сборка на `python:3.12-slim`.
 
-## Способы запуска
+- Стадия `builder` ставит зависимости в `/opt/venv`.
+- Финальная стадия копирует это окружение и исходники командой `COPY . .`.
+- Запуск: `CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5000"]`.
+- `.dockerignore` не пускает в контекст сборки `.git`, `.env`, конфиги прокси, скрипты и отчёт.
 
-### 1. Запуск через Docker Compose
+Проверка сборки:
 
-**Архитектура при запуске через Docker Compose:**
-```
-Клиент → Nginx (8090) → HAProxy (8080) → FastAPI App (5000) → MySQL
-```
+![Задача 1: сборка Dockerfile.python](screenshots/task1-build.png)
 
-### 2. Локальный запуск для разработки
+## Задача 2
 
-```bash
-# Создайте виртуальное окружение
-python3 -m venv venv
-source venv/bin/activate  # в Windows: venv\Scripts\activate
+В Yandex Cloud создан Container Registry `test` (`crpl31l01ibecrq4epuq`). Локальный Docker авторизован в `cr.yandex`. Образ приложения запушен как `cr.yandex/crpl31l01ibecrq4epuq/shvirtd-python:latest` (id `crpnrt9d3e9ah7o26sjg`).
 
-# Установите зависимости
-pip install -r requirements.txt
+Сканирование `che2isvi342p2r6rumca` завершилось со статусом READY: HIGH 49, MEDIUM 90, LOW 65, UNDEFINED 5. Полный список — в [scan-report.txt](scan-report.txt).
 
-# Настройте переменные окружения для подключения к БД(не забудьте отдельно запустить БД)
-export DB_HOST='127.0.0.1'
-export DB_USER='app'  
-export DB_PASSWORD='very_strong'
-export DB_NAME='example'
+## Задача 3
 
-# Запустите приложение
-uvicorn main:app --host 0.0.0.0 --port 5000 --reload
-```
+`compose.yaml` подключает `proxy.yaml` через `include` и описывает сервисы в bridge-сети `backend` (`172.20.0.0/24`):
 
-**Требования для локального запуска:**
-- Python 3.12+
-- Запущенный сервер MySQL
-- База данных и пользователь, настроенные согласно переменным окружения
+| Сервис | Образ | Адрес | Перезапуск |
+| --- | --- | --- | --- |
+| `web` | сборка из `Dockerfile.python` | `172.20.0.5` | `always` |
+| `db` | `mysql:8` | `172.20.0.10` | `always` |
 
-## Настройка базы данных MySQL
+Секреты MySQL и параметры приложения берутся из существующего `.env`. Приложение ходит в базу по имени сервиса `db` (`DB_HOST=db`). HAProxy из `proxy.yaml` обращается к приложению по `172.20.0.5:5000`, Nginx публикует сайт на порту 8090.
 
-```sql
-CREATE DATABASE example;
-CREATE USER 'app'@'localhost' IDENTIFIED BY 'very_strong';
-GRANT ALL PRIVILEGES ON example.* TO 'app'@'localhost';
-FLUSH PRIVILEGES;
-```
+Локальная проверка `curl -L http://127.0.0.1:8090` вернула время и `127.0.0.1`. После запроса в базе `virtd` есть таблица `requests`. Проект после проверки остановлен (`docker compose down`).
 
-## Доступные эндпоинты
+![Задача 3: curl на порт 8090 и SQL-запрос](screenshots/task3-sql.png)
 
-- `GET /` - главная страница (записывает запрос в БД и возвращает время + IP)
-- `GET /requests` - просмотр всех записей из базы данных  
-- `GET /debug` - отладочная информация о заголовках запроса
-- `GET /docs` - автоматическая документация FastAPI (Swagger UI)
+## Задача 4
 
-## Переменные окружения
+Виртуальная машина `shvirtd-docker` в зоне `ru-central1-a`, 2 ГБ RAM. Внешний адрес: `89.169.142.6`. Пользователь SSH: `yc-user`. На машине установлен Docker Engine и Docker Compose v5.7.1.
 
-| Переменная | Значение по умолчанию | Описание |
-|------------|----------------------|----------|
-| `DB_HOST` | `127.0.0.1` | Хост базы данных MySQL |
-| `DB_USER` | `app` | Пользователь БД |
-| `DB_PASSWORD` | `very_strong` | Пароль БД |
-| `DB_NAME` | `example` | Имя базы данных |
+`deploy.sh` проверяет наличие `git` и `docker compose`, клонирует форк в `/opt/shvirtd-example-python` и запускает `docker compose up -d --build`.
 
-## Проверка работы
+Проверка снаружи: https://check-host.net/check-report/5856e0cfk51b — HTTP 200 из Санкт-Петербурга, Мадрида и Лос-Анджелеса.
 
-```bash
-# При правильной настройке через прокси
-curl http://localhost:8090
+![Задача 4: check-host.net](screenshots/check-host.png)
 
-# При прямом обращении (НЕПРАВИЛЬНО) 
-curl http://localhost:5000  
-# Получите подсказку о том, что нужно использовать порт 8090
+Тот же SQL-запрос на сервере:
+
+![Задача 4: SQL на виртуальной машине](screenshots/sql-vm.png)
+
+Удалённый Docker-контекст `yc-vm` (`ssh://yc-user@89.169.142.6`):
+
+![Задача 4: docker context и docker ps -a](screenshots/docker-context-ps.png)
+
+## Задача 5
+
+`backup.sh` читает логин и пароль из `.env` в момент запуска и не хранит их в скрипте. Дамп снимает контейнер `schnitzler/mysqldump` в сети `backend`, файл пишется в `/opt/backup`.
+
+Cron на ВМ, раз в минуту:
+
+```cron
+* * * * * /opt/shvirtd-example-python/backup.sh >> /var/log/mysql-backup.log 2>&1
 ```
 
-## Лицензия
+![Задача 5: несколько копий в /opt/backup и crontab](screenshots/backup-opt.png)
 
-Этот проект распространяется под лицензией MIT (подробности в файле `LICENSE`).
+## Задача 6
+
+Образ `hashicorp/terraform:latest` просмотрен в `dive`: бинарник попадает в образ слоем `COPY dist/linux/amd64/terraform /bin/terraform` (129 МБ).
+
+![Задача 6: dive](screenshots/terraform-dive.png)
+
+Тот же образ сохранён через `docker save`. Из слоя `e7de563dc3c18fcc77647c54bb531938dc2af11500c2a5a672c25feb4ef76ac0` извлечён `/bin/terraform`, версия 1.17.2.
+
+![Задача 6: docker save и terraform version](screenshots/terraform-docker-save.png)
